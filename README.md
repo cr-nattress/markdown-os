@@ -59,15 +59,12 @@ Both layers resolve to the same **intent taxonomy** — 35+ semantic intents acr
 markdown-os/
 ├── README.md                           ← This document
 ├── docs/
-│   ├── ARCHITECTURE.md                 ← Platform layers, compilation pipeline, tool-calling model
-│   ├── PHILOSOPHY.md                   ← Post-syntax programming, intent-as-keyword, zero-infra
-│   └── PROVIDER-ABSTRACTION.md         ← Claude/OpenAI common surface, adapter interface
+│   ├── ARCHITECTURE.md                 ← Platform architecture, I/O envelope, provider abstraction, converter
+│   └── PHILOSOPHY.md                   ← Post-syntax programming, intent-as-keyword, zero-infra
 ├── spec/
 │   ├── CORE-TENETS.md                  ← The 7 non-negotiable axioms (with examples and acid tests)
 │   ├── LANGUAGE.md                     ← Full language spec: Markup, Promptdown, Intents, Testing, Repos
-│   ├── PERSISTENCE.md                  ← Memory profiles, storage primitives, context management
-│   ├── IO-ENVELOPE.md                  ← Inbound/outbound envelope, management endpoints
-│   └── CONVERTER.md                    ← Markup-to-code pipeline, React target, round-tripping
+│   └── PERSISTENCE.md                  ← Memory profiles, storage primitives, context management
 └── examples/
     ├── specificity-spectrum/           ← Same app at 3 detail levels (demonstrates "always builds")
     │   ├── README.md
