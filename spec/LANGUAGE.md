@@ -1102,83 +1102,345 @@ Compiler optimizes:
   $analysis <- "Synthesize these partial analyses into a unified report: {{$partials}}"
 ```
 
-## Automatic Formatting
+## Built-in Design Patterns
 
-The compiler reformats all code — author-written or synthesized — into clean, efficient form before execution. This applies to both Markup and Promptdown.
+Design patterns are not a library. They are not optional best practices. They are **built into the compiler.** Every program is automatically restructured to use the appropriate design patterns during compilation. The author never needs to know or name a pattern — the compiler recognizes when one applies and applies it.
 
-### What Formatting Does
+In traditional programming, design patterns are something a developer learns, chooses, and implements manually. Most code never uses them correctly, or at all. In Markdown OS, the compiler produces code that a senior architect would write — because the compiler *is* the architect.
 
-**Prompt engineering** — Raw, casual prompts are reformatted into structured prompts with clear instructions, output format specifications, and constraint framing:
+### Patterns the Compiler Applies
+
+**Pipeline** — When the program processes data through sequential transformations, the compiler structures it as a pipeline with discrete, testable stages:
+
+```
+Author writes:
+  "Take the raw order, validate it, enrich it with CRM data,
+   score it for fraud, format it for Slack, and post it."
+
+Compiler produces:
+  TEMPLATE validate($order): ... END
+  TEMPLATE enrich($order): ... END
+  TEMPLATE score($order): ... END
+  TEMPLATE format($scored_order): ... END
+
+  # Pipeline: each stage is isolated, testable, replaceable
+  $validated <- CALL validate($raw_order)
+  $enriched <- CALL enrich($validated)
+  $scored <- CALL score($enriched)
+  $formatted <- CALL format($scored)
+  PRINT $formatted
+```
+
+Each stage is a separate template with a single responsibility. Stages can be tested independently, swapped, or reordered.
+
+**Strategy** — When the program has branching behavior based on type or condition, the compiler extracts each branch into a named strategy:
+
+```
+Author writes:
+  "Handle the ticket differently depending on its type. Billing
+   tickets need account lookup. Technical tickets need log search.
+   Feature requests just need acknowledgment."
+
+Compiler produces:
+  SKILL @handle_billing($ticket): ... END
+  SKILL @handle_technical($ticket): ... END
+  SKILL @handle_feature_request($ticket): ... END
+
+  # Strategy: dispatch to the right handler
+  $type <- @classify($ticket, "billing, technical, feature_request")
+  IF {{$type}} CONTAINS "billing":
+    $response <- @handle_billing($ticket)
+  ELSE IF {{$type}} CONTAINS "technical":
+    $response <- @handle_technical($ticket)
+  ELSE:
+    $response <- @handle_feature_request($ticket)
+  END
+```
+
+**Chain of Responsibility** — When multiple checks must be evaluated in order and any one can short-circuit the process:
+
+```
+Author writes:
+  "Before processing the order: check if it's a duplicate,
+   check if the customer is blocked, validate the payload,
+   verify the amount is within limits."
+
+Compiler produces:
+  TEMPLATE check_duplicate($order): ... RETURN { pass: true/false, reason } END
+  TEMPLATE check_blocked($order): ... END
+  TEMPLATE validate_payload($order): ... END
+  TEMPLATE verify_limits($order): ... END
+
+  # Chain: each check can reject; first rejection stops the chain
+  $checks = [check_duplicate, check_blocked, validate_payload, verify_limits]
+  FOR $check IN $checks:
+    $result <- CALL $check($order)
+    IF {{$result}} CONTAINS "fail":
+      PRINT "Rejected: {{$result}}"
+      HALT
+    END
+  END
+```
+
+**Observer** — When events should trigger side effects without coupling the main logic to them:
+
+```
+Author writes:
+  "When an order is scored, log the score, notify the team if
+   it's high risk, and update the dashboard metrics."
+
+Compiler produces:
+  # Main logic — clean, no side-effect knowledge
+  $score <- CALL score_order($order)
+
+  # Observer: side effects triggered by the scoring event
+  PARALLEL:
+    REMEMBER { order: $order, score: $score, time: NOW } AS "score_log"
+    IF {{$score}} CONTAINS "high":
+      $alert <- @rewrite($score, "format as Slack alert")
+      EMIT $alert TO "slack:#risk-alerts"
+    END
+    EMIT { metric: "order_scored", value: $score } TO "metrics"
+  END
+```
+
+**Retry with Circuit Breaker** — When external calls can fail and repeated failures should trigger a fallback mode:
+
+```
+Author writes:
+  "Call the CRM. If it's been failing a lot lately, skip it
+   and use cached data instead."
+
+Compiler produces:
+  RECALL "crm_failures" INTO $failure_count
+
+  IF $failure_count > 5:
+    # Circuit breaker: OPEN — use fallback
+    RECALL "crm_cache" INTO $customer WHERE id = $customer_id
+    $customer.source = "cache (circuit breaker open)"
+  ELSE:
+    # Circuit breaker: CLOSED — try the real call
+    $customer <- FETCH "https://crm.api/customers/{{$customer_id}}"
+      WITH SECRET "crm_api_key"
+    IF FAILED:
+      REMEMBER ($failure_count + 1) AS "crm_failures"
+      RECALL "crm_cache" INTO $customer WHERE id = $customer_id
+    ELSE:
+      REMEMBER 0 AS "crm_failures"
+      REMEMBER $customer AS "crm_cache"
+    END
+  END
+```
+
+**Decorator** — When cross-cutting concerns (logging, timing, validation) should wrap a capability without modifying it:
+
+```
+Author writes:
+  "Log how long every external call takes. Validate inputs
+   before any scoring operation."
+
+Compiler wraps capabilities automatically:
+  # The original skill is unchanged
+  SKILL @score_fraud($order): ... END
+
+  # Compiler-generated decorator: adds timing + validation
+  TEMPLATE scored_and_logged($order):
+    $start = NOW
+    $valid <- @classify($order, "valid, invalid")
+    IF {{$valid}} CONTAINS "invalid":
+      RETURN { error: "invalid input", order: $order }
+    END
+    $result <- @score_fraud($order)
+    $elapsed = NOW - $start
+    REMEMBER { skill: "score_fraud", elapsed: $elapsed } AS "perf_log"
+    RETURN $result
+  END
+```
+
+### Pattern Recognition Table
+
+| Signal in Author's Code | Pattern Applied | Why |
+|---|---|---|
+| Sequential transformations on the same data | Pipeline | Testable stages, clear data flow |
+| Branching behavior by type/category | Strategy | Isolated handlers, easy to extend |
+| Multiple validation checks before processing | Chain of Responsibility | Short-circuit on first failure |
+| Side effects triggered by an event | Observer | Main logic stays clean |
+| External calls that can fail | Retry + Circuit Breaker | Resilience without manual wiring |
+| Cross-cutting concerns (logging, timing, auth) | Decorator | Wraps without modifying |
+| Complex object construction from multiple sources | Builder | Step-by-step assembly |
+| Shared state accessed by multiple components | Singleton via MEMORY | One source of truth |
+| Need to undo or roll back operations | Command | Every mutation is reversible |
+| Adapting external data to internal format | Adapter | Normalize at the boundary |
+
+### Design Patterns in Converted Code
+
+When the converter produces traditional code (React, TypeScript, C#, etc.), the design patterns carry through. The generated code uses idiomatic implementations of the same patterns:
+
+| Pattern in Promptdown | React/TypeScript | C# |
+|---|---|---|
+| Pipeline | Compose functions with `.then()` or pipe operator | LINQ pipeline / middleware chain |
+| Strategy | Strategy map object / discriminated union | Interface + implementations |
+| Chain of Responsibility | Middleware array | Handler chain |
+| Observer | Event emitter / pub-sub hooks | `IObservable<T>` / events |
+| Circuit Breaker | Wrapper class with state | Polly circuit breaker policy |
+| Decorator | Higher-order function / HOC | Attribute / wrapper class |
+
+The converted code doesn't just work — it follows the same patterns that a senior developer would choose for that language.
+
+## Automatic Formatting and Style
+
+The compiler enforces a **single, consistent style** across all code — author-written, synthesized, imported, and converted. There is no style debate. There is no inconsistency between files, authors, or compilation passes. Every program looks like it was written by one person with impeccable standards.
+
+### Universal Style Rules
+
+All compiled output follows these rules. They are not configurable — consistency is the point.
+
+**Naming:**
+- Variables: `$descriptive_name` (snake_case, never `$x`, `$temp`, `$data1`)
+- Templates: `verb_noun` (e.g., `score_fraud`, `validate_payload`, `format_summary`)
+- Skills: `@verb_noun` (e.g., `@classify`, `@extract`, `@tone_check`)
+- Agents: `noun_phrase` (e.g., `research_competitor`, `handle_ticket`)
+- Memory keys: `domain_entity` (e.g., `processed_orders`, `customer_history`)
+
+**Structure:**
+- One responsibility per template/skill
+- Maximum 10 lines per template body (split into sub-calls if longer)
+- Maximum 3 parameters per template (use structured input beyond that)
+- No nested IF deeper than 2 levels (extract into templates)
+- No inline prompts longer than 5 lines (extract into templates)
+
+**Prompts:**
+- System context first, then user input, then output format
+- Explicit output format specification on every prompt
+- Constraints and guardrails stated as clear rules, not prose
+- No ambiguous instructions ("do your best" → "return exactly 3 bullet points")
+
+**Comments:**
+- Every template/skill: one-line purpose comment
+- Every non-obvious branch: why this condition exists
+- Every synthesized construct: what triggered synthesis
+- No commented-out code (delete it; version history preserves it)
+
+### The Compiler as Formatter
+
+The compiler doesn't just check style — it **enforces** it by rewriting. The author's code is always transformed to match the style rules:
 
 ```
 Before (author wrote):
-  $result <- "look at this order and tell me if it seems fraudulent {{$order}}"
+  $x <- "get the name from {{$d}}"
+  $y <- "now check if {{$x}} is a repeat customer in our system"
+  IF {{$y}} CONTAINS "yes":
+    $z <- "look at their order history and figure out if this
+           new order seems weird compared to what they usually buy"
+    IF {{$z}} CONTAINS "weird":
+      PRINT "flag this"
+    END
+  END
 
 After (compiler reformats):
-  $result <- "Evaluate this order for fraud indicators.
+  # Extract customer name from input data
+  $customer_name <- @extract($input_data, "customer name")
 
-              Order data: {{$order}}
+  # Check repeat customer status
+  $is_repeat <- @classify($customer_name, "new_customer, repeat_customer")
 
-              Assess these signals:
-              - New vs. returning customer
-              - Address mismatch (shipping vs. billing)
-              - Payment attempt patterns
-              - Order timing anomalies
+  IF {{$is_repeat}} CONTAINS "repeat_customer":
+    # Analyze order against purchase history for anomalies
+    $anomaly_check <- CALL detect_order_anomaly($order, $customer_name)
 
-              Return: risk level (low/medium/high) and a one-sentence explanation."
-```
-
-The compiler understood the intent ("tell me if it seems fraudulent") and produced a structured prompt that will get a better, more consistent response from the LLM. The author's intent is preserved. The quality of the prompt is elevated.
-
-**Code simplification** — Verbose or redundant Promptdown is simplified:
-
-```
-Before:
-  $x <- "Extract name from: {{$data}}"
-  $y = $x
-  IF {{$y}} NOT EMPTY:
-    $z = $y
-    PRINT $z
-  END
-
-After:
-  $name <- "Extract name from: {{$data}}"
-  IF {{$name}} NOT EMPTY:
-    PRINT $name
+    IF {{$anomaly_check}} CONTAINS "anomalous":
+      PRINT "Flag: order anomaly detected for {{$customer_name}}"
+    END
   END
 ```
 
-**Intent deduplication** — When the same logical intent appears multiple times in different phrasings, the compiler normalizes:
+Every change the compiler made:
+- `$x`, `$y`, `$z`, `$d` → descriptive names
+- Casual prompts → routed to skills or extracted to templates
+- Nested structure → flattened where possible
+- Vague language ("seems weird") → precise language ("anomalous")
+- Bare `PRINT "flag this"` → informative output with context
+
+### Style Consistency Across a Project
+
+When a project has multiple files, the compiler ensures they all look like they were written together:
+
+- Same naming conventions across all files
+- Same prompt structure patterns
+- Same error handling approach
+- Same comment density and style
+- Same abstraction level (if one file uses templates for everything, they all do)
 
 ```
-Before (in markup):
-  "Grab the customer's email address."
-  ... (later in the same document) ...
-  "Pull the email from the customer record."
-
-After:
-  Single EXTRACT intent, called once, result reused.
+Consistency check:
+  ✓ 12 files — all using snake_case template names
+  ✓ 12 files — all prompts have explicit output format
+  ✓ 12 files — all external calls wrapped in retry
+  ✓ 12 files — all memory keys follow domain_entity convention
+  ⚠ helpers/format.pd uses $fmt instead of $formatted — auto-corrected
 ```
+
+### Testability as a Style Requirement
+
+The compiler doesn't just make code *look* good — it makes code **testable by construction**. Every compiled program has these properties:
+
+- **Every template is independently callable** — no template depends on global state or implicit context
+- **Every skill has deterministic inputs and outputs** — the signature tells you everything you need to test it
+- **Every agent is isolated** — runs in its own scope, returns a value, can be tested without side effects
+- **Every side effect is explicit** — EMIT, REMEMBER, CLI are visible in the code, not hidden in prompts
+- **Every branch is reachable** — the compiler eliminates dead branches and ensures all paths can be exercised
+
+If the compiler can't make a construct testable, it restructures the code until it can:
+
+```
+Before (untestable — business logic mixed with side effects):
+  $score <- "Score this order: {{$order}}"
+  REMEMBER $score AS "scores"
+  EMIT $score TO "slack"
+  PRINT $score
+
+After (testable — logic separated from effects):
+  # Pure function — testable in isolation
+  TEMPLATE score_order($order):
+    $score <- "Evaluate fraud risk for this order.
+               Order: {{$order}}
+               Return: score (0-100) and one-sentence explanation."
+    RETURN $score
+  END
+
+  # Side effects — explicit, separate, mockable
+  $score <- CALL score_order($order)
+  REMEMBER $score AS "scores"
+  EMIT $score TO "slack"
+  PRINT $score
+```
+
+The business logic (`score_order`) can now be tested without triggering persistence or Slack calls. The side effects are visible, explicit, and mockable.
 
 ### Formatting Is Non-Destructive
 
 The compiler never changes the author's **intent** — only the **form**. The optimization trace shows exactly what was changed and why:
 
 ```
-Optimization trace:
+Compilation trace:
   ✓ Consolidated 3 sequential extractions into 1 structured prompt (3x → 1x LLM calls)
   ✓ Parallelized 2 independent operations (estimated 2x speedup)
   ✓ Routed "summarize the document" to @summarize skill
   ✓ Reformatted 1 casual prompt into structured format
+  ✓ Applied Pipeline pattern to 5-stage data transformation
+  ✓ Applied Strategy pattern to 3-branch ticket handling
+  ✓ Applied Decorator pattern: added timing to all external calls
+  ✓ Separated business logic from side effects in 2 templates (testability)
+  ✓ Renamed 4 variables for clarity ($x → $customer_name, etc.)
   ✓ Synthesized @diagnose_defect skill from repeated pattern
   ✓ Added recursion bound (max 5 iterations) to open-ended refinement loop
   ⚠ Dropped unused variable $temp_result (line 42)
 ```
 
-The author can inspect every optimization, override any of them, or disable optimization for specific sections with `LITERAL:` blocks:
+The author can inspect every change, override any of them, or disable formatting for specific sections with `LITERAL:` blocks:
 
 ```promptdown
-# This block is executed exactly as written — no compiler optimization
+# This block is executed exactly as written — no compiler formatting or pattern application
 LITERAL:
   $result <- "look at this and tell me what you think: {{$data}}"
 END
