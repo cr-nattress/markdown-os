@@ -17,6 +17,7 @@ Both layers resolve to the same **intent taxonomy**. Markup expresses intents th
 - [Design Philosophy](#design-philosophy)
 - [The Markup Language](#the-markup-language)
 - [Promptdown](#promptdown)
+- [The Compiler](#the-compiler)
 - [Testing](#testing)
 - [Repositories](#repositories)
 - [Intent Taxonomy](#intent-taxonomy)
@@ -688,6 +689,371 @@ PRINT $reply
 
 ---
 
+# The Compiler
+
+## What the Compiler Is
+
+The compiler is a markdown file. That's it. It is the language definition document — this specification — that describes how to interpret Markup and Promptdown constructs, what the intents mean, and how to execute them.
+
+Compilation is passing the **code files** (the application's `.md` and `.pd` files) to an LLM **along with the compiler** (this language definition file). The LLM reads both, understands the application through the lens of the language spec, and produces the compiled output — whether that's direct execution, a system prompt, an optimized pipeline, or converted code.
+
+```
+Traditional compilation:
+  source.c + gcc → binary
+
+Markdown OS compilation:
+  application.md + LANGUAGE.md + LLM → compiled application
+```
+
+The compiler is not a binary. It's not an installed tool. It's a document that instructs the LLM how to interpret another document. Any LLM that can read markdown can be the compilation runtime. The language definition *is* the compiler.
+
+This means:
+- **The compiler is portable** — copy the markdown file, and any LLM can compile your application
+- **The compiler is readable** — a human can read the compiler and understand exactly how the language works
+- **The compiler is versionable** — different versions of the language definition produce different compilation behavior
+- **The compiler evolves with the language** — adding a new intent means adding a section to this document
+
+## The Compiler Is Generative
+
+Because the compiler is an LLM reading a language definition, it **understands what the program is trying to do** — not just its syntax, but its intent. This means it can do things no traditional compiler can:
+
+- **Synthesize capabilities that don't exist yet** — if the program needs a skill that isn't defined, the compiler creates one
+- **Recognize patterns and optimize** — if the program does the same thing 10 times linearly, the compiler introduces loops, recursion, or parallelism
+- **Format and simplify** — verbose, messy, or redundant code is automatically reformatted into clean, efficient prompts
+- **Choose the right abstraction** — the compiler decides whether something should be a skill, a template, an agent, or inline code
+
+The compiler is not a passive translator. It is an **active capability creator** that produces the most efficient execution plan for the author's intent.
+
+## Dynamic Skill Synthesis
+
+When the compiler encounters an intent that no existing skill, template, or tool covers, it **creates one on the fly.** The synthesized skill is a first-class construct — it has a name, parameters, a prompt body, and can be reused.
+
+### How It Works
+
+```
+Author writes:
+  "For each customer complaint, identify the root product defect,
+   suggest an engineering fix, and rate the fix complexity."
+
+Compiler recognizes:
+  1. No existing skill handles "identify root product defect"
+  2. This is a repeating pattern (FOR EACH)
+  3. The operation has clear inputs (complaint) and outputs (defect, fix, complexity)
+
+Compiler synthesizes:
+  SKILL @diagnose_defect($complaint):
+    $defect <- "Identify the root product defect from: {{$complaint}}"
+    $fix <- "Suggest an engineering fix for: {{$defect}}"
+    $complexity <- @classify($fix, "trivial, moderate, complex, architectural")
+    RETURN { defect: $defect, fix: $fix, complexity: $complexity }
+  END
+
+Compiler emits optimized code:
+  FOR $complaint IN $complaints:
+    $result <- @diagnose_defect($complaint)
+    PRINT $result
+  END
+```
+
+The author wrote 3 lines of natural language. The compiler produced a reusable skill with structured output, a classification sub-call, and a loop. The author never asked for any of this — the compiler recognized the need and built the right abstraction.
+
+### When the Compiler Creates Capabilities
+
+| Signal | What the Compiler Does |
+|---|---|
+| Repeated similar `<-` calls with varying inputs | Extracts a TEMPLATE or SKILL |
+| Natural language describing a multi-step process | Synthesizes an AGENT with SEQUENCE |
+| "For each X, do Y" in markup | Generates a SKILL + FOR loop |
+| Independent operations on the same data | Wraps in PARALLEL |
+| A pattern that matches an existing skill's shape | Routes to the existing skill instead of a raw `<-` |
+| Recursive structure ("do this, then refine, then refine again") | Generates recursive TEMPLATE with termination condition |
+| Error handling described generically | Synthesizes RETRY/FALLBACK/SKIP wrappers |
+
+### Recursive Optimization
+
+The compiler recognizes when a task benefits from iterative refinement and generates recursive structures:
+
+```
+Author writes:
+  "Draft a press release. Review it for corporate tone issues.
+   Fix any issues found. Repeat until clean."
+
+Compiler synthesizes:
+  TEMPLATE refine_press_release($draft, $max_iterations):
+    $review <- @tone_check($draft)
+    IF {{$review}} CONTAINS "no issues":
+      RETURN $draft
+    END
+    IF $max_iterations <= 0:
+      RETURN $draft
+    END
+    $improved <- @rewrite($draft, "fix these tone issues: {{$review}}")
+    RETURN CALL refine_press_release($improved, $max_iterations - 1)
+  END
+
+  $first_draft <- "Write a press release about: {{$announcement}}"
+  $final <- CALL refine_press_release($first_draft, 5)
+  PRINT $final
+```
+
+The author said "repeat until clean." The compiler built bounded recursion with a termination condition, a refinement loop, and a maximum iteration guard. It chose recursion over a loop because each iteration's input depends on the previous iteration's output.
+
+## Automatic Optimization
+
+The compiler analyzes the entire program and optimizes it before execution. This isn't optional — every program is optimized as a compilation step.
+
+### What the Compiler Optimizes
+
+**Prompt consolidation** — Multiple sequential `<-` calls that could be a single, richer prompt are merged:
+
+```
+Before (author wrote):
+  $name <- "Extract the customer name from: {{$email}}"
+  $issue <- "Extract the main issue from: {{$email}}"
+  $urgency <- "Rate the urgency of: {{$email}}"
+
+After (compiler optimizes):
+  $analysis <- "From this email, extract:
+                1. Customer name
+                2. Main issue
+                3. Urgency rating (1-5)
+                Format as structured output. Email: {{$email}}"
+  # Single LLM call instead of three — same result, 1/3 the cost and latency
+```
+
+**Parallel detection** — Independent operations are automatically parallelized:
+
+```
+Before (author wrote sequentially):
+  $sentiment <- @sentiment($review)
+  $entities <- @extract($review, "product, issue")
+  $category <- @classify($review, "bug, feature, complaint")
+
+After (compiler wraps in PARALLEL):
+  PARALLEL:
+    $sentiment <- @sentiment($review)
+    $entities <- @extract($review, "product, issue")
+    $category <- @classify($review, "bug, feature, complaint")
+  END
+```
+
+**Skill routing** — Raw `<-` calls that match an existing skill's semantics are routed through the skill instead:
+
+```
+Before (author wrote):
+  $result <- "Summarize the following document in 3 bullet points: {{$doc}}"
+
+After (compiler routes to skill):
+  $result <- @summarize($doc, "3 bullet points")
+  # Uses the skill's engineered system prompt — better results, consistent behavior
+```
+
+**Dead code elimination** — Variables that are computed but never used are dropped. LLM calls that have no downstream consumers are flagged as warnings.
+
+**Memoization** — If the same `<-` call with the same input appears multiple times, the compiler caches the result:
+
+```
+Before:
+  $score_a <- @sentiment($review)
+  # ... other code ...
+  $score_b <- @sentiment($review)  # same input as $score_a
+
+After:
+  $score_a <- @sentiment($review)
+  $score_b = $score_a  # reuse — no duplicate LLM call
+```
+
+**Context windowing** — For programs that consume large inputs, the compiler splits data into chunks, processes in parallel, and aggregates:
+
+```
+Author writes:
+  $analysis <- "Analyze this 200-page report for compliance issues: {{$report}}"
+
+Compiler optimizes:
+  $chunks <- SPLIT $report BY_PAGES 20
+  PARALLEL:
+    FOR $chunk IN $chunks:
+      $partial <- "Analyze for compliance issues: {{$chunk}}"
+    END
+  END
+  $analysis <- "Synthesize these partial analyses into a unified report: {{$partials}}"
+```
+
+## Automatic Formatting
+
+The compiler reformats all code — author-written or synthesized — into clean, efficient form before execution. This applies to both Markup and Promptdown.
+
+### What Formatting Does
+
+**Prompt engineering** — Raw, casual prompts are reformatted into structured prompts with clear instructions, output format specifications, and constraint framing:
+
+```
+Before (author wrote):
+  $result <- "look at this order and tell me if it seems fraudulent {{$order}}"
+
+After (compiler reformats):
+  $result <- "Evaluate this order for fraud indicators.
+
+              Order data: {{$order}}
+
+              Assess these signals:
+              - New vs. returning customer
+              - Address mismatch (shipping vs. billing)
+              - Payment attempt patterns
+              - Order timing anomalies
+
+              Return: risk level (low/medium/high) and a one-sentence explanation."
+```
+
+The compiler understood the intent ("tell me if it seems fraudulent") and produced a structured prompt that will get a better, more consistent response from the LLM. The author's intent is preserved. The quality of the prompt is elevated.
+
+**Code simplification** — Verbose or redundant Promptdown is simplified:
+
+```
+Before:
+  $x <- "Extract name from: {{$data}}"
+  $y = $x
+  IF {{$y}} NOT EMPTY:
+    $z = $y
+    PRINT $z
+  END
+
+After:
+  $name <- "Extract name from: {{$data}}"
+  IF {{$name}} NOT EMPTY:
+    PRINT $name
+  END
+```
+
+**Intent deduplication** — When the same logical intent appears multiple times in different phrasings, the compiler normalizes:
+
+```
+Before (in markup):
+  "Grab the customer's email address."
+  ... (later in the same document) ...
+  "Pull the email from the customer record."
+
+After:
+  Single EXTRACT intent, called once, result reused.
+```
+
+### Formatting Is Non-Destructive
+
+The compiler never changes the author's **intent** — only the **form**. The optimization trace shows exactly what was changed and why:
+
+```
+Optimization trace:
+  ✓ Consolidated 3 sequential extractions into 1 structured prompt (3x → 1x LLM calls)
+  ✓ Parallelized 2 independent operations (estimated 2x speedup)
+  ✓ Routed "summarize the document" to @summarize skill
+  ✓ Reformatted 1 casual prompt into structured format
+  ✓ Synthesized @diagnose_defect skill from repeated pattern
+  ✓ Added recursion bound (max 5 iterations) to open-ended refinement loop
+  ⚠ Dropped unused variable $temp_result (line 42)
+```
+
+The author can inspect every optimization, override any of them, or disable optimization for specific sections with `LITERAL:` blocks:
+
+```promptdown
+# This block is executed exactly as written — no compiler optimization
+LITERAL:
+  $result <- "look at this and tell me what you think: {{$data}}"
+END
+```
+
+## Automatic Documentation
+
+The compiler generates documentation for everything it touches — author-written code, synthesized capabilities, and optimization decisions. No code exists without explanation.
+
+### Inline Comments
+
+Every synthesized or optimized construct gets inline comments explaining what it does and why the compiler chose that structure:
+
+```promptdown
+# Synthesized by compiler: extracts defect info from complaints
+# Created because lines 12-14 describe a repeating analysis pattern
+# Uses @classify for complexity rating (routed from raw prompt)
+SKILL @diagnose_defect($complaint):
+  # Step 1: Identify the root cause from the complaint text
+  $defect <- "Identify the root product defect from: {{$complaint}}"
+  # Step 2: Generate an engineering fix based on the identified defect
+  $fix <- "Suggest an engineering fix for: {{$defect}}"
+  # Step 3: Rate fix complexity using classification skill
+  $complexity <- @classify($fix, "trivial, moderate, complex, architectural")
+  RETURN { defect: $defect, fix: $fix, complexity: $complexity }
+END
+```
+
+### Companion Documentation
+
+For complex programs, the compiler generates a companion markdown file that describes the program's structure, intent flow, synthesized capabilities, and optimization decisions:
+
+```
+app-name.pd          ← the program
+app-name.docs.md     ← compiler-generated documentation
+```
+
+The companion file includes:
+- **Program summary** — what the program does, derived from its intent graph
+- **Capability catalog** — every skill, template, and agent (author-defined and synthesized)
+- **Intent flow diagram** — the chain of intents from RECEIVE to EMIT
+- **Optimization log** — what the compiler changed and why
+- **Dependency map** — what repos, tools, CLIs, and secrets the program uses
+- **Test coverage** — which constructs are tested and which need tests
+
+### Documentation for Converted Code
+
+When the converter produces traditional code (React, TypeScript, etc.), the compiler adds documentation to the generated code too:
+
+- Every function gets a JSDoc/docstring explaining which intent it implements
+- Every file gets a header comment linking back to the markup section that generated it
+- The project README is generated from the markup's Purpose section
+- Complex transformations get inline comments explaining the mapping from intent to code
+
+Documentation is a compiler output, not an author burden.
+
+## Capability Lifecycle
+
+Dynamically synthesized capabilities aren't throwaway. The compiler manages their lifecycle:
+
+1. **Synthesis** — the compiler creates the capability during compilation
+2. **Testing** — synthesized capabilities are auto-tested before execution (the compiler generates test cases from the context that triggered synthesis)
+3. **Caching** — a synthesized skill that works is cached and reused across requests
+4. **Promotion** — if a synthesized skill is used frequently, the platform promotes it to a named, versioned skill that can be imported by other programs
+5. **Drift detection** — synthesized skills are re-evaluated when the underlying model changes
+
+```
+Synthesis lifecycle:
+  Compiler recognizes need → Synthesizes skill → Auto-generates tests →
+  Tests pass → Skill cached → Skill used in execution →
+  (Optional) Promoted to named skill → Available as dependency
+```
+
+### The Compiler as Collaborator
+
+The compiler surfaces its decisions. After compilation, the author sees:
+
+```
+Compilation report:
+  Capabilities synthesized:
+    @diagnose_defect(complaint) — created from lines 12-14
+    @refine_tone(draft, iterations) — created from line 23
+
+  Optimizations applied:
+    3 prompt consolidations (saved ~6 LLM calls)
+    2 parallel wraps (estimated 4s faster)
+    1 recursive structure with bound of 5
+
+  Suggestions:
+    "The @diagnose_defect skill could be extracted to a shared repo
+     if other programs need similar defect analysis."
+    "Consider adding a MOCK for @diagnose_defect to improve test coverage."
+```
+
+The author is always in control. The compiler proposes; the author disposes. But the default is smart — the compiler does the right thing unless told otherwise.
+
+---
+
 # Testing
 
 ## Nothing Ships Without Tests
@@ -1319,6 +1685,20 @@ Expressions: "use ffmpeg to extract a clip," "run the database migration," "comp
 Default: Scoped to the requesting application. Never exposed in logs or LLM context.
 Expressions: "use our Shopify API key," "authenticate with Slack," "connect to the database," "get the API credentials"
 
+## Compiler Intents
+
+**SYNTHESIZE** — Create a new capability (skill, template, agent) dynamically.
+Default: Auto-test before use; cache for reuse across requests.
+Expressions: "the compiler creates a skill for," "dynamically generates a template," "synthesizes an agent to handle"
+
+**OPTIMIZE** — Restructure code for efficiency without changing intent.
+Default: Consolidate prompts, parallelize independent operations, route to skills, memoize duplicates.
+Expressions: "the compiler consolidates," "parallelizes these operations," "routes to existing skill"
+
+**DOCUMENT** — Generate documentation for code, constructs, and decisions.
+Default: Add inline comments to all synthesized and optimized code. Generate companion markdown files for complex programs.
+Expressions: "the compiler documents," "generates explanation for," "adds comments describing"
+
 ## Verification Intents
 
 **TEST** — Define an expected behavior given specific inputs.
@@ -1479,6 +1859,9 @@ The Markup layer, Promptdown layer, and Intent Taxonomy all express the same con
 | **MOCK** | "mock the scoring template" | `MOCK name AS: RETURN "value" END` |
 | **EXEC** | "use ffmpeg to extract a clip" | `$result <- CLI "command"` |
 | **PROVISION** | "use our Shopify API key" | `SECRET "key_name"` |
+| **SYNTHESIZE** | (compiler creates capabilities dynamically) | Automatic — compiler emits SKILL/TEMPLATE/AGENT |
+| **OPTIMIZE** | (compiler restructures for efficiency) | Automatic — prompt consolidation, parallelization, memoization |
+| **DOCUMENT** | (compiler generates documentation) | Automatic — inline comments, companion `.docs.md` files |
 | **RECEIVE** | "when an order arrives" | `$input = ...` (entry point variable) |
 | **EMIT** | "post to Slack" | `PRINT $var` or tool integration |
 | **TRANSFORM** | "format as a summary" | `$result <- "transform: {{$input}}"` |
