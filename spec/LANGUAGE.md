@@ -1421,6 +1421,102 @@ IMPORT DATA "thresholds.json" FROM fraud INTO $thresholds
 IMPORT * FROM lib
 ```
 
+### Direct File References
+
+Not every dependency is a whole repository. Code files can reference other code files directly using relative paths or URLs — no `USE` declaration needed.
+
+```promptdown
+# Relative path — reference a file in the same project
+INCLUDE "./shared/scoring-rules.pd"
+INCLUDE "../common/skills.pd"
+INCLUDE "./data/thresholds.json" INTO $thresholds
+
+# URL — reference a file anywhere on the web
+INCLUDE "https://raw.githubusercontent.com/acme/fraud-toolkit/main/skills/score-order.pd"
+INCLUDE "https://example.com/prompts/compliance-check.pd"
+
+# Markdown files as knowledge context
+INCLUDE "./docs/scoring-methodology.md" AS KNOWLEDGE
+INCLUDE "https://raw.githubusercontent.com/stripe/stripe-api-docs/main/docs/api/charges.md" AS KNOWLEDGE
+```
+
+`INCLUDE` is the file-level primitive. It loads a single file directly — no manifest, no repo scanning, no alias required. The file's contents become available in the current scope as if they were written inline.
+
+#### What INCLUDE Loads
+
+| File Type | What Happens |
+|---|---|
+| `.pd` file | Templates, skills, and agents in the file become callable |
+| `.md` file | Loaded as knowledge context for the LLM |
+| `.json`, `.csv`, `.yaml` | Loaded as data into a variable (requires `INTO $var`) |
+| Any other file | Loaded as text — the LLM reads it as reference material |
+
+#### Relative Paths Resolve from the Including File
+
+```
+project/
+├── main.pd               ← INCLUDE "./helpers/format.pd"
+├── helpers/
+│   ├── format.pd          ← resolved from main.pd's location
+│   └── validate.pd
+└── data/
+    └── rules.json
+```
+
+Paths are always relative to the file that contains the `INCLUDE`, not the project root. This matches how imports work in every modern language.
+
+#### URL References
+
+URLs point to raw file content. The platform fetches, caches, and loads them:
+
+```promptdown
+# Pin to a specific commit for reproducibility
+INCLUDE "https://raw.githubusercontent.com/acme/toolkit/a1b2c3d/skills/analyze.pd"
+
+# Or use a branch (latest, but less reproducible)
+INCLUDE "https://raw.githubusercontent.com/acme/toolkit/main/skills/analyze.pd"
+```
+
+URL references are cached by content hash. The platform re-fetches only when the cache expires or the program explicitly requests a refresh.
+
+#### INCLUDE vs. USE/IMPORT
+
+Both systems coexist. Use whichever fits:
+
+| When to use | Construct |
+|---|---|
+| Reference a single file from the same project | `INCLUDE "./path/to/file.pd"` |
+| Reference a single file by URL | `INCLUDE "https://..."` |
+| Depend on a whole repo with version pinning | `USE "github:org/repo@v2"` + `IMPORT` |
+| Need selective imports from a large repo | `USE` + `IMPORT specific_thing FROM alias` |
+| Quick prototyping, scripts, one-offs | `INCLUDE` (less ceremony) |
+| Production dependencies with lock files | `USE` (version resolution, `uses.lock`) |
+
+#### Markup Layer
+
+In markup, file references are natural language:
+
+```markdown
+## Uses
+
+Use the scoring rules defined in ./shared/scoring-rules.pd.
+Reference the PCI compliance checklist at ./docs/pci-checklist.md.
+Load risk thresholds from ./data/thresholds.json.
+```
+
+The compiler resolves these references the same way it resolves `INCLUDE` — by relative path from the current file.
+
+#### Circular Reference Protection
+
+The platform detects circular includes and rejects them at compile time:
+
+```
+Error: Circular reference detected
+  main.pd → helpers/format.pd → helpers/validate.pd → main.pd
+```
+
+Each file is loaded exactly once regardless of how many files include it. If `format.pd` and `validate.pd` both include `./common/utils.pd`, the utils file is loaded once and shared.
+
 ### Namespaced Access
 
 Imported content is callable by name or via its namespace:
@@ -1675,6 +1771,10 @@ Expressions: "use the scoring rules from," "reference the API docs from," "depen
 Default: Load on first access; apply relevance filtering for knowledge imports.
 Expressions: "import the scoring template," "use their sentiment skill," "load the compliance rules as context"
 
+**INCLUDE** — Load a single file by relative path or URL.
+Default: Resolve path relative to the including file. Cache URL references by content hash. Deduplicate across multiple includers.
+Expressions: "use the scoring rules defined in ./shared/scoring.pd," "reference the file at," "load the checklist from"
+
 ## Execution Intents
 
 **EXEC** — Run an external CLI command.
@@ -1854,6 +1954,7 @@ The Markup layer, Promptdown layer, and Intent Taxonomy all express the same con
 |---|---|---|
 | **REQUIRE** | "use the rules from our compliance repo" | `USE "github:org/repo@v2" AS alias` |
 | **IMPORT** | "import the scoring template" | `IMPORT name FROM alias` |
+| **INCLUDE** | "use the rules in ./shared/scoring.pd" | `INCLUDE "./path/file.pd"` or `INCLUDE "https://..."` |
 | **TEST** | "when given a valid invoice, it should approve" | `TEST "description": ... END` |
 | **ASSERT** | "the result should contain a score" | `ASSERT $var CONTAINS "text"` |
 | **MOCK** | "mock the scoring template" | `MOCK name AS: RETURN "value" END` |
