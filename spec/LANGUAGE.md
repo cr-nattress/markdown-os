@@ -713,6 +713,229 @@ This means:
 - **The compiler is versionable** — different versions of the language definition produce different compilation behavior
 - **The compiler evolves with the language** — adding a new intent means adding a section to this document
 
+## Layered Compilation
+
+Compilation is not a single step. It is a **recursive descent through N layers of markdown**, where each layer adds specificity, structure, and precision. The top layer is plain-speak — goals, ideas, concepts. The bottom layer is explicit prompts, fully-resolved context, and execution harnesses. The compiler recursively transforms one into the other.
+
+This is the same architecture as .NET:
+
+```
+.NET Framework:
+  C# (high-level)  →  IL (intermediate)  →  Machine Code (executable)
+  goals & types        structured ops         CPU instructions
+
+Markdown OS:
+  Markup (high-level)  →  N intermediate layers  →  Prompts + Harnesses (executable)
+  goals & intent           structured markdown       explicit LLM instructions
+```
+
+### The Layers
+
+**Layer 0 — Plain speak.** The author's original document. Goals, intent, purpose, ideas, concepts, details. Written in natural language at whatever level of specificity the author chooses. This is the source of truth.
+
+```markdown
+# Customer Support Bot
+
+Help customers with billing questions. Be friendly but efficient.
+Look up their account, understand the issue, and either resolve it
+or escalate to a human. Remember what was discussed.
+```
+
+**Layer 1 — Structured intent.** The compiler reads Layer 0 and produces a structured breakdown: identified intents, extracted parameters, inferred behavior, and gaps to fill. This layer makes the implicit explicit.
+
+```markdown
+# Customer Support Bot — Layer 1 (Compiled)
+
+## Identity
+Single-purpose: billing support chatbot.
+Scope boundary: billing questions only. Not technical support,
+not sales, not general inquiries.
+
+## Intent Graph
+RECEIVE(customer_message)
+  → RECALL(account, by customer_id)
+  → BRANCH:
+      billing_question → SEQUENCE:
+        EXTRACT(issue_type, from message)
+        RECALL(billing_history, by account)
+        TRANSFORM(resolution, from issue + history)
+        EMIT(response, to customer)
+        REMEMBER(conversation, for context)
+      unresolvable → DELEGATE(human_agent)
+        EMIT(escalation_summary, to agent)
+
+## Inferred Defaults
+- Tone: friendly, efficient (author specified)
+- Persistence: conversation history (author specified "remember")
+- Escalation: hand off with context (author specified "escalate to human")
+- Auth: assumes customer is already identified (gap — platform default)
+- Error handling: standard retry on external lookups (gap — platform default)
+```
+
+**Layer 2 — Promptdown scaffolding.** The compiler converts the structured intent graph into Promptdown code with templates, skills, agents, and control flow. Synthesized capabilities appear here.
+
+```promptdown
+# Customer Support Bot — Layer 2 (Compiled)
+
+SKILL @resolve_billing($issue, $history):
+  $resolution <- "You are a billing support specialist.
+                  The customer's issue: {{$issue}}
+                  Their billing history: {{$history}}
+                  Provide a clear, friendly resolution.
+                  If you cannot resolve it, say ESCALATE."
+  RETURN $resolution
+END
+
+AGENT handle_message($customer_id, $message):
+  RECALL "accounts" INTO $account WHERE customer_id = $customer_id
+  RECALL "conversations" INTO $prior WHERE customer_id = $customer_id
+
+  $issue <- @classify($message, "payment, invoice, refund, subscription, other")
+
+  IF {{$issue}} CONTAINS "other":
+    RETURN { action: "escalate", reason: "out of scope — not a billing question" }
+  END
+
+  RECALL "billing_history" INTO $history WHERE account = $account
+  $response <- @resolve_billing($issue, $history)
+
+  IF {{$response}} CONTAINS "ESCALATE":
+    $summary <- @summarize($prior + $message)
+    RETURN { action: "escalate", summary: $summary }
+  END
+
+  REMEMBER { customer_id: $customer_id, message: $message, response: $response } AS "conversations"
+  RETURN { action: "respond", message: $response }
+END
+```
+
+**Layer 3 — Explicit prompts and harnesses.** The compiler resolves every `<-` and `@skill` call into fully-specified prompts with system instructions, output format constraints, and execution harnesses. This is what actually executes against the LLM.
+
+```markdown
+# Customer Support Bot — Layer 3 (Compiled)
+
+## Prompt: classify_issue
+System: You are a billing issue classifier. Categorize the customer
+message into exactly one of: payment, invoice, refund, subscription, other.
+Return ONLY the category name, nothing else.
+
+User: {{$message}}
+
+Expected output: single word from the category list.
+Retry on malformed output: up to 2 attempts.
+Fallback on failure: "other"
+
+## Prompt: resolve_billing
+System: You are a billing support specialist for {{$company}}.
+Tone: friendly, efficient, empathetic. Never defensive.
+You have access to the customer's billing history.
+If you can resolve the issue, provide a clear answer.
+If you cannot resolve it, respond with exactly "ESCALATE" followed
+by a one-sentence reason.
+
+Context:
+- Customer issue type: {{$issue}}
+- Billing history: {{$history}}
+- Prior conversation: {{$prior}}
+
+User: {{$message}}
+
+Output format: plain text response, max 200 words.
+Guardrails: never reveal internal system details, never provide
+financial advice, never promise refunds without authorization.
+
+## Harness: handle_message
+1. Load account from persistence (key: customer_id)
+2. Load conversation history (key: customer_id, last 10 entries)
+3. Execute classify_issue prompt
+4. If "other" → return escalation response
+5. Load billing history (key: account_id)
+6. Execute resolve_billing prompt
+7. If response contains "ESCALATE" → summarize + return escalation
+8. Persist conversation entry
+9. Return response to customer
+
+Error handling:
+- Persistence failure → retry 3x, then return "temporarily unavailable"
+- LLM failure → retry 2x, then escalate to human
+- Timeout (>10s) → return "looking into this, one moment" + async retry
+```
+
+### Recursive Descent
+
+Each layer is itself a markdown document. The compiler takes Layer N and produces Layer N+1 by:
+
+1. **Reading** the current layer alongside the language definition
+2. **Resolving** ambiguity — replacing natural language with explicit intents
+3. **Expanding** — filling gaps with platform defaults and synthesized capabilities
+4. **Structuring** — converting prose into Promptdown control flow
+5. **Specifying** — turning Promptdown into explicit prompts with harness instructions
+
+```
+Layer 0 (plain speak)
+  ↓ compiler pass 1: intent extraction + gap filling
+Layer 1 (structured intent)
+  ↓ compiler pass 2: code generation + skill synthesis
+Layer 2 (Promptdown scaffolding)
+  ↓ compiler pass 3: prompt resolution + harness generation
+Layer 3 (explicit prompts + harnesses)
+  ↓ compiler pass N: further optimization, splitting, specialization
+Layer N (execution-ready artifacts)
+```
+
+The number of layers is not fixed. A simple application ("Track my expenses") might compile in 2 passes. A complex application with multiple agents, integrations, and branching logic might need 4 or 5. The compiler decides how many passes are needed based on the complexity of the source.
+
+### Every Layer Is Inspectable
+
+Every intermediate layer is a markdown file. The author can inspect any layer to understand what the compiler did:
+
+```
+app/
+├── support-bot.md                    ← Layer 0: author's source
+├── .compiled/
+│   ├── support-bot.L1.md             ← Layer 1: structured intent
+│   ├── support-bot.L2.pd             ← Layer 2: Promptdown scaffolding
+│   ├── support-bot.L3.md             ← Layer 3: explicit prompts + harnesses
+│   └── support-bot.trace.md          ← compilation trace: what changed at each layer
+```
+
+The author can:
+- **Read any layer** to understand the compilation decisions
+- **Edit an intermediate layer** to override the compiler at that level
+- **Pin a layer** to prevent the compiler from regenerating it (useful for hand-tuned prompts)
+- **Diff between layers** to see exactly what the compiler expanded, inferred, or restructured
+
+### Layer Overrides
+
+If the author disagrees with a compiler decision at any layer, they can override it by editing the intermediate file and pinning it:
+
+```markdown
+# support-bot.L2.pd (PINNED — compiler will not regenerate this layer)
+# Author override: changed escalation logic to always include account summary
+
+AGENT handle_message($customer_id, $message):
+  # ... author's hand-tuned version ...
+END
+```
+
+When a layer is pinned, the compiler starts from that layer instead of regenerating it from Layer 0. Compilation continues downward from the pinned layer.
+
+### The .NET Analogy in Full
+
+| .NET | Markdown OS | Purpose |
+|---|---|---|
+| C# source | Layer 0 (Markup) | High-level: goals, types, logic |
+| Roslyn compiler | LANGUAGE.md + LLM | Understands source, produces intermediate form |
+| IL (Intermediate Language) | Layers 1-N (compiled markdown) | Structured, portable, inspectable intermediate form |
+| JIT compiler | Final compilation pass | Produces execution-ready artifacts optimized for the target |
+| Machine code | Layer N (prompts + harnesses) | Explicit instructions for the execution runtime (LLM) |
+| .NET Framework / BCL | Built-in skills, tools, intents | Standard library of reusable capabilities |
+| NuGet packages | USE/IMPORT repos | External dependencies |
+| Assembly metadata | Compilation trace | What was compiled, how, and why |
+| PDB debug symbols | Intermediate layers | Allow debugging at any abstraction level |
+
+The key difference: in .NET, IL is a binary format designed for machines. In Markdown OS, every intermediate layer is a readable markdown document designed for humans *and* machines. The author can intervene at any layer. The compiler can be understood by reading it.
+
 ## The Compiler Is Generative
 
 Because the compiler is an LLM reading a language definition, it **understands what the program is trying to do** — not just its syntax, but its intent. This means it can do things no traditional compiler can:
